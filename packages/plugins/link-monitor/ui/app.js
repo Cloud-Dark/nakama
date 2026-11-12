@@ -317,6 +317,9 @@ var style_default = `[data-plugin-id="link-monitor"] {
 
 // src/ui-context.ts
 var VERDICTS = ["spam", "suspicious", "clean"];
+function isVerdict(value) {
+  return value === "spam" || value === "suspicious" || value === "clean";
+}
 var EMPTY_FILTERS = {
   chatId: "",
   domain: "",
@@ -627,7 +630,7 @@ function createList(ctx) {
         const verdict = value === null ? "" : String(value);
         const next = {
           ...draft,
-          verdict: VERDICTS.includes(verdict) ? verdict : ""
+          verdict: isVerdict(verdict) ? verdict : ""
         };
         setDraft(next);
         onChange(next);

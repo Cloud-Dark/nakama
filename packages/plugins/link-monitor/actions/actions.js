@@ -448,7 +448,11 @@ function listLinks(db, input) {
 function linkStats(db) {
   const verdicts = db.query("SELECT verdict, COUNT(*) AS total FROM links GROUP BY verdict").all();
   const domains = db.query("SELECT domain, COUNT(*) AS total, MAX(score) AS score FROM links GROUP BY domain ORDER BY total DESC, domain ASC LIMIT ?").all(MAX_STATS_DOMAINS);
-  const byVerdict = { clean: 0, spam: 0, suspicious: 0 };
+  const byVerdict = {
+    clean: 0,
+    spam: 0,
+    suspicious: 0
+  };
   for (const entry of verdicts) {
     byVerdict[entry.verdict] = entry.total;
   }
