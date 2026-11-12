@@ -225,6 +225,7 @@ import {
   saveWebSearchConfig,
   saveWhatsAppConfig,
   toMailboxConfig,
+  loadWhatsAppConfigFile,
   transcribeAudio,
   USER_CONTEXT_TEMPLATE,
   WEB_SEARCH_PROVIDER_ENV_NAMES,
@@ -466,6 +467,19 @@ type SessionRunSettings = Pick<StoredSessionRecord, "model" | "thinkingEffort">;
 
 /** sub_agent chats one parent may start; the cap proposed on #2036. */
 const MAX_CHILD_SESSIONS = 5;
+
+/**
+ * Titen's writing tools, plus the reference-server names its MCP server also
+ * serves. The `listening` switch removes exactly these, so recall keeps
+ * working while a chat is not being saved.
+ */
+const MEMORY_WRITE_TOOL_NAMES = new Set([
+  "add_observations",
+  "create_entities",
+  "create_relations",
+  "titen_consolidate",
+  "titen_remember",
+]);
 
 type ChatProfileAccess = Pick<
   CreateSessionOptions,
@@ -6052,6 +6066,31 @@ export class AgentService {
   }
 
   /** The profile's tools plus the platform groups this kind of turn gets. */
+  /**
+   * Whether this agent's WhatsApp connection still has `listening` on. The
+   * switch governs writing to memory, so a chat with it off keeps recall and
+   * loses only the saving.
+   */
+  private async whatsAppListeningEnabled(
+    profile: StoredProfileRecord
+  ): Promise<boolean> {
+    if (!profile.orgId) {
+      return true;
+    }
+
+    try {
+      const config = await loadWhatsAppConfigFile({
+        orgId: profile.orgId,
+        profileId: profile.id,
+      });
+
+      return config ? config.botActions.listening : true;
+    } catch {
+      // A missing or unreadable file is an install that never set the switch.
+      return true;
+    }
+  }
+
   private async resolveProfileTools(
     profile: StoredProfileRecord,
     kind: TurnKind,
@@ -6406,6 +6445,12 @@ export class AgentService {
     // Group admin actions reach the WhatsApp worker, so only a WhatsApp turn
     // gets them; the tools themselves still check permission and admin rights.
     if (hasOwnTools && policy.whatsappGroup) {
+      if (!(await this.whatsAppListeningEnabled(profile))) {
+        resolved = resolved.filter(
+          (tool) => !MEMORY_WRITE_TOOL_NAMES.has(tool.name)
+        );
+      }
+
       resolved = [
         ...resolved,
         ...whatsappGroupTools,

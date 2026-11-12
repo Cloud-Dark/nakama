@@ -7,6 +7,7 @@ import {
   isWhatsAppBotAction,
   parseWhatsAppBotPermissions,
   parseWhatsAppPermCommand,
+  parseWhatsAppSummaryCommand,
   resolveWhatsAppBotPermissions,
   resolveWhatsAppCallerRole,
   serializeWhatsAppBotPermissions,
@@ -165,24 +166,24 @@ describe("caller role", () => {
 describe("the in-chat control command", () => {
   test("a message that is not !perm is left to the agent", () => {
     expect(parseWhatsAppPermCommand("tolong kick orang itu")).toBeNull();
-    expect(parseWhatsAppPermCommand("!help")).toBeNull();
-    expect(parseWhatsAppPermCommand("!status")).toBeNull();
+    expect(parseWhatsAppPermCommand("/help")).toBeNull();
+    expect(parseWhatsAppPermCommand("/status")).toBeNull();
   });
 
-  test("bare !perm lists the current state", () => {
-    expect(parseWhatsAppPermCommand("!perm")).toEqual({ kind: "list" });
-    expect(parseWhatsAppPermCommand("!perm list")).toEqual({ kind: "list" });
-    expect(parseWhatsAppPermCommand("  !Perm  ")).toEqual({ kind: "list" });
+  test("bare /perm lists the current state", () => {
+    expect(parseWhatsAppPermCommand("/perm")).toEqual({ kind: "list" });
+    expect(parseWhatsAppPermCommand("/perm list")).toEqual({ kind: "list" });
+    expect(parseWhatsAppPermCommand("  /Perm  ")).toEqual({ kind: "list" });
   });
 
   test("on and off name one action", () => {
-    expect(parseWhatsAppPermCommand("!perm off remove")).toEqual({
+    expect(parseWhatsAppPermCommand("/perm off remove")).toEqual({
       action: "remove",
       kind: "set",
       on: false,
     });
 
-    expect(parseWhatsAppPermCommand("!perm on Add")).toEqual({
+    expect(parseWhatsAppPermCommand("/perm on Add")).toEqual({
       action: "add",
       kind: "set",
       on: true,
@@ -190,25 +191,54 @@ describe("the in-chat control command", () => {
   });
 
   test("an unknown action or verb is reported, never guessed", () => {
-    expect(parseWhatsAppPermCommand("!perm on nonsense")).toEqual({
+    expect(parseWhatsAppPermCommand("/perm on nonsense")).toEqual({
       kind: "unknown",
       word: "nonsense",
     });
 
-    expect(parseWhatsAppPermCommand("!perm sideways remove")).toEqual({
+    expect(parseWhatsAppPermCommand("/perm sideways remove")).toEqual({
       kind: "unknown",
       word: "sideways",
     });
 
-    expect(parseWhatsAppPermCommand("!perm on")).toEqual({
+    expect(parseWhatsAppPermCommand("/perm on")).toEqual({
       kind: "unknown",
       word: "on",
     });
   });
 
   test("help is available from the chat", () => {
-    expect(parseWhatsAppPermCommand("!perm help")).toEqual({ kind: "help" });
-    expect(whatsAppPermCommandHelp()).toContain("!perm on");
+    expect(parseWhatsAppPermCommand("/perm help")).toEqual({ kind: "help" });
+    expect(whatsAppPermCommandHelp()).toContain("/perm on");
+  });
+});
+
+describe("the summary command", () => {
+  test("accepts both spellings and ignores other messages", () => {
+    expect(parseWhatsAppSummaryCommand("/summary")).toContain(
+      "whatsapp_group_summary"
+    );
+
+    expect(parseWhatsAppSummaryCommand("/ringkas")).toContain(
+      "whatsapp_group_summary"
+    );
+
+    expect(parseWhatsAppSummaryCommand("/Summary")).not.toBeNull();
+    expect(parseWhatsAppSummaryCommand("/help")).toBeNull();
+    expect(parseWhatsAppSummaryCommand("ringkas dong")).toBeNull();
+  });
+
+  test("passes a message count through and caps it", () => {
+    expect(parseWhatsAppSummaryCommand("/summary 120")).toContain("limit 120");
+    expect(parseWhatsAppSummaryCommand("/summary 5000")).toContain("limit 200");
+    expect(parseWhatsAppSummaryCommand("/summary 0")).not.toContain("limit");
+    expect(parseWhatsAppSummaryCommand("/summary abc")).not.toContain("limit");
+  });
+
+  test("tells the agent not to invent messages", () => {
+    const request = parseWhatsAppSummaryCommand("/summary") ?? "";
+
+    expect(request).toContain("Jangan mengarang");
   });
 });
 

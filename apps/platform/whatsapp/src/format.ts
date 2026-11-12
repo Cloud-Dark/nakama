@@ -162,5 +162,7 @@ export const HELP_TEXT = `Nakama WhatsApp commands:
 /org \u2014 choose or switch organization
 /status \u2014 server and model status
 /attach \u2014 send the most recent saved artifact as a WhatsApp document
+/summary \u2014 summarize this chat (also /ringkas; add a count, e.g. /summary 120)
+/perm \u2014 show what the bot may do here; /perm on|off <action> switches one
 
 Send text to chat with the agent. After a save, ask to "send the file" for a native attachment.`;

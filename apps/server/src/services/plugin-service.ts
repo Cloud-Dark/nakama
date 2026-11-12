@@ -170,6 +170,7 @@ const OFFICIAL_PLUGINS = new Map<
   ["workflows", { requiresHost: true, setupAction: "import_legacy" }],
   ["supermemory", { requiresHost: true }],
   ["data-view", { requiresHost: true }],
+  ["link-monitor", { requiresHost: true }],
 ]);
 
 const lifecycleLocks = new Map<string, Promise<unknown>>();

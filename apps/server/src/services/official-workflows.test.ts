@@ -24,7 +24,12 @@ test("official workflow install imports once, executes through IPC, isolates org
   directories.push(dir);
   const officialPackagesDir = join(dir, "official");
 
-  for (const pluginId of ["workflows", "supermemory", "data-view"]) {
+  for (const pluginId of [
+    "workflows",
+    "supermemory",
+    "data-view",
+    "link-monitor",
+  ]) {
     await cp(
       resolve(import.meta.dir, "../../../../packages/plugins", pluginId),
       join(officialPackagesDir, pluginId),

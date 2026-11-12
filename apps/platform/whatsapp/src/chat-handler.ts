@@ -42,7 +42,19 @@ import {
   DEFAULT_WHATSAPP_REQUIRE_GROUP_MENTION,
   hasActivePairingCode,
   looksLikePairingCode,
+  saveWhatsAppConfig,
 } from "@nakama/core/whatsapp-config";
+import {
+  canChangeWhatsAppBotPermissions,
+  canCommandWhatsAppBot,
+  describeWhatsAppBotPermissions,
+  parseWhatsAppPermCommand,
+  parseWhatsAppSummaryCommand,
+  resolveWhatsAppCallerRole,
+  whatsAppPermChangeDeniedMessage,
+  whatsAppPermCommandHelp,
+  type WhatsAppPermCommand,
+} from "@nakama/core/whatsapp-permissions";
 import {
   downloadContentFromMessage,
   type WASocket,
@@ -350,7 +362,17 @@ function createScopedChatHandler(deps: ChatHandlerDeps) {
         return;
       }
 
-      if (trimmed.startsWith("/")) {
+      const summaryRequest = parseWhatsAppSummaryCommand(trimmed);
+
+      if (trimmed.startsWith("/") && !summaryRequest) {
+        const perm = parseWhatsAppPermCommand(trimmed);
+
+        if (perm) {
+          await handlePermCommand(jid, isGroup, senderJids, perm);
+
+          return;
+        }
+
         await handleCommand(conversationKey, channelOrgKey, jid, trimmed);
 
         return;
@@ -370,10 +392,12 @@ function createScopedChatHandler(deps: ChatHandlerDeps) {
         conversationKey,
         jid,
         {
-          message: withGroupContext(
-            withQuotedContext(attachUserText, inbound.quotedText),
-            isGroup
-          ),
+          message: summaryRequest
+            ? summaryRequest
+            : withGroupContext(
+                withQuotedContext(attachUserText, inbound.quotedText),
+                isGroup
+              ),
           ...mediaInput?.input,
         },
         {
@@ -404,6 +428,113 @@ function createScopedChatHandler(deps: ChatHandlerDeps) {
 
     const result = await authStore.tryPair(text, jid);
     await sendText(jid, result.message);
+  }
+
+  /**
+   * `/perm` from inside WhatsApp. Reading is open to anyone who may command the
+   * bot; switching an action is restricted to the owner and the allow list, so
+   * a group admin cannot widen the bot's powers over the owner's own account.
+   */
+  async function handlePermCommand(
+    jid: string,
+    isGroup: boolean,
+    senderJids: readonly string[],
+    command: WhatsAppPermCommand
+  ): Promise<void> {
+    if (command.kind === "help") {
+      await sendText(jid, whatsAppPermCommandHelp());
+
+      return;
+    }
+
+    if (command.kind === "unknown") {
+      await sendText(
+        jid,
+        `Aksi "${command.word}" tidak dikenal.\n\n${whatsAppPermCommandHelp()}`
+      );
+
+      return;
+    }
+
+    const stored = authStore.getConfig();
+
+    if (!stored) {
+      await sendText(jid, "Koneksi WhatsApp ini belum dikonfigurasi.");
+
+      return;
+    }
+
+    const groupAdminJids = isGroup ? await readGroupAdminJids(jid) : [];
+
+    const role = resolveWhatsAppCallerRole({
+      allowedPhones: stored.allowedPhones,
+      callerJid: senderJids[0] ?? null,
+      groupAdminJids,
+      ownerJids: [stored.pairedJid, stored.pairedLid],
+    });
+
+    if (!canCommandWhatsAppBot(role)) {
+      await sendText(
+        jid,
+        "Maaf, Anda tidak berhak mengatur izin saya. Hanya pemilik bot, nomor yang diizinkan, dan admin grup yang bisa menyuruh saya."
+      );
+
+      return;
+    }
+
+    if (command.kind === "list") {
+      await sendText(
+        jid,
+        `Izin bot saat ini:\n${describeWhatsAppBotPermissions(stored.botActions)}`
+      );
+
+      return;
+    }
+
+    if (!canChangeWhatsAppBotPermissions(role)) {
+      await sendText(jid, whatsAppPermChangeDeniedMessage());
+
+      return;
+    }
+
+    await saveWhatsAppConfig(
+      { botActions: { [command.action]: command.on } },
+      config.owner ?? null
+    );
+
+    await authStore.reload();
+
+    await sendText(
+      jid,
+      [
+        `Aksi "${command.action}" sekarang ${command.on ? "aktif" : "mati"}.`,
+        "",
+        describeWhatsAppBotPermissions(
+          authStore.getConfig()?.botActions ?? stored.botActions
+        ),
+      ].join("\n")
+    );
+  }
+
+  /** Admin identities of a group, empty when the roster cannot be read. */
+  async function readGroupAdminJids(groupJid: string): Promise<string[]> {
+    const socket = getSocket();
+
+    if (!socket) {
+      return [];
+    }
+
+    try {
+      const metadata = await socket.groupMetadata(groupJid);
+
+      return metadata.participants
+        .values()
+        .filter((participant) => Boolean(participant.admin))
+        .map((participant) => participant.id)
+        .toArray();
+    } catch {
+      return [];
+    }
   }
 
   async function handleCommand(

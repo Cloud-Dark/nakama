@@ -10,6 +10,7 @@ export const WHATSAPP_BOT_ACTIONS = [
   "add",
   "demote",
   "group_info",
+  "listening",
   "group_photo",
   "group_settings",
   "group_subject",
@@ -47,6 +48,7 @@ export function defaultWhatsAppBotPermissions(): WhatsAppBotPermissions {
     demote: true,
     group_info: true,
     group_photo: true,
+    listening: true,
     group_settings: true,
     group_subject: true,
     group_summary: true,
@@ -249,6 +251,7 @@ const ACTION_LABELS: Record<WhatsAppBotAction, string> = {
   demote: "turunkan admin",
   group_info: "lihat info grup",
   group_photo: "ganti foto grup",
+  listening: "simpan obrolan ke memori",
   group_settings: "ubah pengaturan grup",
   group_subject: "ganti nama grup",
   group_summary: "ringkas obrolan grup",
@@ -279,15 +282,16 @@ export type WhatsAppPermCommand =
 
 /**
  * Parses the in-chat control command, so the owner can switch actions from
- * WhatsApp itself: `!perm`, `!perm on remove`, `!perm off add`, `!perm help`.
- * Kept out of `channel-commands.ts` because only WhatsApp has group powers.
+ * WhatsApp itself: `/perm`, `/perm on remove`, `/perm off add`, `/perm help`.
+ * Kept out of `channel-commands.ts` because only WhatsApp has group powers,
+ * and WhatsApp's own commands start with "/" rather than "!".
  */
 export function parseWhatsAppPermCommand(
   text: string
 ): WhatsAppPermCommand | null {
   const trimmed = text.trim();
 
-  if (!trimmed.startsWith("!")) {
+  if (!trimmed.startsWith("/")) {
     return null;
   }
 
@@ -321,11 +325,41 @@ export function parseWhatsAppPermCommand(
     : { kind: "unknown", word: third || verb };
 }
 
+const SUMMARY_MAX_LIMIT = 200;
+
+/**
+ * `/summary`, optionally with a message count: `/summary 120`. It returns the
+ * request to put to the agent, which then reads the real transcript with its
+ * summary tool, rather than a canned answer from here.
+ */
+export function parseWhatsAppSummaryCommand(text: string): string | null {
+  const parts = text.trim().split(/\s+/).filter(Boolean);
+  const [word = "", second = ""] = parts;
+
+  if (!["/ringkas", "/summary"].includes(word.toLowerCase())) {
+    return null;
+  }
+
+  const requested = Number.parseInt(second, 10);
+
+  const count =
+    Number.isInteger(requested) && requested > 0
+      ? Math.min(requested, SUMMARY_MAX_LIMIT)
+      : null;
+
+  return [
+    "Ringkas obrolan ini.",
+    `Gunakan tool whatsapp_group_summary${count ? ` dengan limit ${count}` : ""} untuk membaca transkrip yang tersimpan,`,
+    "lalu ringkas hanya dari isi transkrip itu: poin utama, keputusan, dan hal yang masih terbuka.",
+    "Jangan mengarang pesan atau pembicara. Jawab dalam bahasa Indonesia.",
+  ].join(" ");
+}
+
 export function whatsAppPermCommandHelp(): string {
   return [
-    "!perm: lihat aksi yang aktif dan mati",
-    "!perm on <aksi>: nyalakan satu aksi",
-    "!perm off <aksi>: matikan satu aksi",
+    "/perm: lihat aksi yang aktif dan mati",
+    "/perm on <aksi>: nyalakan satu aksi",
+    "/perm off <aksi>: matikan satu aksi",
     `Aksi: ${WHATSAPP_BOT_ACTIONS.join(", ")}`,
     "Hanya pemilik bot dan nomor yang diizinkan boleh mengubah ini.",
   ].join("\n");
@@ -341,7 +375,7 @@ export function whatsAppPermissionDeniedMessage(
   action: WhatsAppBotAction
 ): string {
   if (decision.reason === "action_disabled") {
-    return `Aksi "${action}" (${ACTION_LABELS[action]}) sedang dimatikan. Pemilik bot dapat menyalakannya dengan: !perm on ${action}`;
+    return `Aksi "${action}" (${ACTION_LABELS[action]}) sedang dimatikan. Pemilik bot dapat menyalakannya dengan: /perm on ${action}`;
   }
 
   return "Maaf, Anda tidak berhak menyuruh saya melakukan itu. Hanya pemilik bot, nomor yang diizinkan, dan admin grup yang bisa.";
