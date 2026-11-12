@@ -91,14 +91,13 @@ function readClaimedOrigin(
 function isAllowedClientOrigin(candidate: string, request?: Request): boolean {
   const configured = resolveWebPublicUrl();
 
-  if (configured) {
-    // The desktop app saves its loopback origin at setup and binds a new port
-    // every launch, so a loopback URL vouches for loopback, not for one port.
-    return (
-      sameHost(candidate, configured) ||
+  if (
+    configured &&
+    (sameHost(candidate, configured) ||
       (isLoopbackComposioCallbackBaseUrl(configured) &&
-        isLoopbackComposioCallbackBaseUrl(candidate))
-    );
+        isLoopbackComposioCallbackBaseUrl(candidate)))
+  ) {
+    return true;
   }
 
   if (!request) {
@@ -108,6 +107,13 @@ function isAllowedClientOrigin(candidate: string, request?: Request): boolean {
   }
 
   if (isLoopbackComposioCallbackBaseUrl(candidate)) {
+    return true;
+  }
+
+  if (
+    sameHost(candidate, resolveRequestListenerOrigin(request)) ||
+    sameHost(candidate, resolveRequestSelfOrigin(request))
+  ) {
     return true;
   }
 

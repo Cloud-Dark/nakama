@@ -197,6 +197,20 @@ async function startWhatsAppChannel(
     socketHandle = socket;
 
     outboundServer = await startWhatsAppOutboundServer({
+      getGroupHandle: () => {
+        const activeSocket = socketHandle?.socket;
+
+        if (!(activeSocket && bridgeConnected)) {
+          return null;
+        }
+
+        return {
+          account: activeSocket.user,
+          groupMetadata: (jid) => activeSocket.groupMetadata(jid),
+          groupParticipantsUpdate: (jid, participants, action) =>
+            activeSocket.groupParticipantsUpdate(jid, participants, action),
+        };
+      },
       getSendHandle: () => {
         const activeSocket = socketHandle?.socket;
 

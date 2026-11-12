@@ -65,6 +65,7 @@
     "./teams-config": "./src/teams-config.ts",
     "./teams-worker": "./src/teams-worker.ts",
     "./whatsapp-config": "./src/whatsapp-config.ts",
+    "./whatsapp-permissions": "./src/whatsapp-permissions.ts",
     "./whatsapp-phones": "./src/whatsapp-phones.ts",
     "./whatsapp-worker": "./src/whatsapp-worker.ts",
     "./skills/archive": "./src/skills/archive.ts",

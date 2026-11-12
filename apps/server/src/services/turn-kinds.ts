@@ -40,6 +40,8 @@ interface TurnPolicy {
     skillManage: boolean | "by_channel";
     subAgent: boolean;
     todo: boolean;
+    /** WhatsApp group admin actions; only a WhatsApp turn can use them. */
+    whatsappGroup: boolean | "by_channel";
   } | null;
 }
 
@@ -63,6 +65,7 @@ const ALL_TOOLS = {
   skillManage: "by_channel",
   subAgent: true,
   todo: true,
+  whatsappGroup: "by_channel",
 } as const;
 
 /**
@@ -77,6 +80,7 @@ const DELEGATED_TOOLS = {
   skillManage: false,
   subAgent: false,
   todo: false,
+  whatsappGroup: false,
 } as const;
 
 const TURN_POLICIES: Record<TurnKind, TurnPolicy> = {
@@ -137,6 +141,10 @@ export function turnPolicy(kind: TurnKind, channel?: AgentChannel) {
         tools.skillManage === "by_channel"
           ? Boolean(channel && SKILL_MANAGE_CHANNELS[channel])
           : tools.skillManage,
+      whatsappGroup:
+        tools.whatsappGroup === "by_channel"
+          ? channel === "whatsapp"
+          : tools.whatsappGroup,
     },
   };
 }

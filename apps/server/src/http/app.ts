@@ -40,6 +40,7 @@ import { registerInternalCuratorRoutes } from "./routes/internal-curator";
 import { registerMcpOAuthRoutes, registerMcpRoutes } from "./routes/mcp";
 import { registerModelRoutes } from "./routes/models";
 import { registerNotificationDestinationRoutes } from "./routes/notification-destinations";
+import { registerNotificationRoutes } from "./routes/notifications";
 import { registerNotificationWebhookRoutes } from "./routes/notification-webhooks";
 import { registerOrgCuratorRoutes } from "./routes/org-curator";
 import { registerOrgMemberRoutes } from "./routes/org-members";
@@ -468,6 +469,7 @@ export function createHonoApp(options: ServerOptions) {
   registerOrgCuratorRoutes(app, options);
   registerSkillProposalRoutes(app, options);
   registerSkillSuggestionRoutes(app, options);
+  registerNotificationRoutes(app, options);
 
   app.get("/openapi.json", (c) => {
     const serverUrl = new URL(c.req.url).origin;

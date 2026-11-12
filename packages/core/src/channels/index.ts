@@ -8,4 +8,6 @@ export * from "./telegram-outbound";
 
 export * from "./types";
 
+export * from "./whatsapp-groups";
+
 export * from "./whatsapp-outbound";

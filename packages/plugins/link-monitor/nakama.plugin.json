@@ -1,0 +1,218 @@
+{
+  "apiVersion": 1,
+  "id": "link-monitor",
+  "name": "Link Monitor",
+  "version": "0.1.0",
+  "minNakamaVersion": "0.4.10",
+  "author": "Nakama",
+  "license": "MIT",
+  "description": "Record every link posted in chat, score it for spam, and keep the analysis in a browsable list.",
+  "actions": [
+    {
+      "key": "record_link",
+      "access": "member",
+      "effect": "write",
+      "entry": "actions/actions.js",
+      "exposeAsTool": true,
+      "description": "Record one link found in a chat message and return its spam verdict. Pass chatId and sender so repeat posting and trusted senders are scored. Set enrich to true to add a written analysis. Call this once per link, as soon as you see it.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "url": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "chatId": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "sender": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "trustedSenders": {
+            "type": "array",
+            "maxItems": 200,
+            "items": {
+              "type": "string",
+              "maxLength": 256
+            }
+          },
+          "enrich": {
+            "type": "boolean"
+          }
+        },
+        "required": ["url"]
+      }
+    },
+    {
+      "key": "list_links",
+      "access": "member",
+      "effect": "read",
+      "entry": "actions/actions.js",
+      "exposeAsTool": true,
+      "description": "List recorded links newest first. Filter by verdict, domain or chatId, and pass query to keep links whose url, sender, message or analysis contains the text.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "verdict": {
+            "type": "string",
+            "enum": ["clean", "suspicious", "spam"]
+          },
+          "domain": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "chatId": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "query": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "key": "get_link",
+      "access": "member",
+      "effect": "read",
+      "entry": "actions/actions.js",
+      "exposeAsTool": true,
+      "description": "Read one recorded link with its full analysis and the signals that fired. Use an id from list_links.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "key": "analyze_link",
+      "access": "member",
+      "effect": "write",
+      "entry": "actions/actions.js",
+      "exposeAsTool": true,
+      "description": "Score a link again and rewrite its analysis. Pass id to re-check a recorded link, or url to check one without recording it.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "url": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "chatId": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "sender": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "trustedSenders": {
+            "type": "array",
+            "maxItems": 200,
+            "items": {
+              "type": "string",
+              "maxLength": 256
+            }
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "key": "set_verdict",
+      "access": "member",
+      "effect": "write",
+      "entry": "actions/actions.js",
+      "exposeAsTool": true,
+      "description": "Override the verdict a person disagrees with. The override is remembered, so later scoring never changes this verdict back.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "verdict": {
+            "type": "string",
+            "enum": ["clean", "suspicious", "spam"]
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        },
+        "required": ["id", "verdict"]
+      }
+    },
+    {
+      "key": "link_stats",
+      "access": "member",
+      "effect": "read",
+      "entry": "actions/actions.js",
+      "exposeAsTool": true,
+      "description": "Count recorded links by verdict and list the busiest domains.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": []
+      }
+    }
+  ],
+  "skills": [
+    {
+      "key": "link-monitor",
+      "directory": "skills/link-monitor"
+    }
+  ],
+  "database": {
+    "migrations": [
+      {
+        "id": "001-link-monitor",
+        "path": "migrations/001-link-monitor.sql"
+      }
+    ]
+  },
+  "ui": {
+    "entryModule": "ui/app.js",
+    "assetsDir": "ui",
+    "pageLabel": "Link Monitor"
+  }
+}

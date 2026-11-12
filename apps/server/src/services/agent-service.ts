@@ -330,6 +330,7 @@ import {
 import { SUB_AGENT_TOOL_NAME } from "../tools/sub-agent-tool";
 import { createSuperNakamaTools } from "../tools/super-nakama-tools";
 import { createTodoTools } from "../tools/todo-tools";
+import { whatsappGroupTools } from "../tools/whatsapp-group-tools";
 import {
   getAgentBrowserStatus,
   saveAgentBrowserConfig,
@@ -6397,6 +6398,12 @@ export class AgentService {
 
     if (hasOwnTools && policy.question && this.questionTools.length > 0) {
       resolved = [...resolved, ...this.questionTools];
+    }
+
+    // Group admin actions reach the WhatsApp worker, so only a WhatsApp turn
+    // gets them; the tools themselves still check permission and admin rights.
+    if (hasOwnTools && policy.whatsappGroup) {
+      resolved = [...resolved, ...whatsappGroupTools];
     }
 
     if (this.skillsService) {

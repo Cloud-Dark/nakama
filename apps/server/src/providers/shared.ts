@@ -24,6 +24,54 @@ export type ProviderJsonValue =
   | ProviderJsonValue[]
   | ProviderJsonRecord;
 
+/**
+ * Some providers tolerate JSON Schema quirks that others reject outright.
+ * Gemini (directly or behind an openai_compatible translating gateway) fails
+ * the whole request on an unusable `enum` — "enum[0]: cannot be empty" — and
+ * MCP servers ship those, because JSON Schema allows nullish or empty-string
+ * members anywhere in a tool's input schema. Drop the unusable members; if
+ * that empties the list, drop the constraint: it is always more permissive
+ * than a broken request.
+ */
+export function dropEmptyEnumLists<Value>(value: Value): Value {
+  if (Array.isArray(value)) {
+    return value.map(dropEmptyEnumLists) as Value;
+  }
+
+  if (value && typeof value === "object") {
+    const record = { ...(value as Record<string, unknown>) };
+
+    for (const [key, child] of Object.entries(record)) {
+      if (key === "enum" && Array.isArray(child)) {
+        const usable = child.filter(
+          (entry) =>
+            (typeof entry === "string" && entry.length > 0) ||
+            typeof entry === "number" ||
+            typeof entry === "boolean"
+        );
+
+        if (usable.length < child.length) {
+          if (usable.length === 0) {
+            delete record[key];
+
+            continue;
+          }
+
+          record[key] = usable;
+
+          continue;
+        }
+      }
+
+      record[key] = dropEmptyEnumLists(child);
+    }
+
+    return record as Value;
+  }
+
+  return value;
+}
+
 export interface ProviderJsonRecord {
   [key: string]: ProviderJsonValue;
 }

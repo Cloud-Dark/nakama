@@ -49,3 +49,13 @@ nakama-secrets.env
 .idea
 ecosystem.config.js
 ecosystem.config.cjs
+
+# Local operator notes and credentials for this deployment (never pushed).
+/cred.md
+/credcloudflare.md
+/mail.md
+/avatar.md
+/github.md
+/errorgroup.md
+/errormcp.md
+/package.json.bak

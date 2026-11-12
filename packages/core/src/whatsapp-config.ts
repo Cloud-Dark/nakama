@@ -35,6 +35,13 @@ import {
   recordPairingFailure,
 } from "./pairing-code";
 import { getUserConfigDir } from "./user-config";
+import {
+  defaultWhatsAppBotPermissions,
+  parseWhatsAppBotPermissions,
+  resolveWhatsAppBotPermissions,
+  serializeWhatsAppBotPermissions,
+  type WhatsAppBotPermissions,
+} from "./whatsapp-permissions";
 import { parseAllowedWhatsAppPhones } from "./whatsapp-phones";
 
 export { parseAllowedWhatsAppPhones } from "./whatsapp-phones";
@@ -79,6 +86,7 @@ export interface WhatsAppConfigFile {
   allowedPhoneDetails?: WhatsAppAllowedPhoneDetails;
   allowedPhones: string[];
   allowUnpairedGroupMembers: boolean;
+  botActions: WhatsAppBotPermissions;
   outboundPort?: string | null;
   outboundToken?: string | null;
   pairedJid: string | null;
@@ -94,6 +102,7 @@ export interface WhatsAppSettingsPublic {
   allowedPhoneDetails: WhatsAppAllowedPhoneDetails;
   allowedPhones: string[];
   allowUnpairedGroupMembers: boolean;
+  botActions: WhatsAppBotPermissions;
   configured: boolean;
   pairedJid: string | null;
   pairingCode: string | null;
@@ -107,6 +116,8 @@ export interface UpdateWhatsAppSettingsInput {
   allowedPhoneNames?: Record<string, string>;
   allowedPhones?: string;
   allowUnpairedGroupMembers?: boolean;
+  /** Only the named actions change; the rest keep their saved value. */
+  botActions?: Partial<WhatsAppBotPermissions>;
   phoneNumber?: string;
   profileId?: string;
   requireGroupMention?: boolean;
@@ -320,6 +331,8 @@ export async function loadWhatsAppConfigFile(
       values.allow_unpaired_group_members,
       !requireGroupMention
     ),
+    // Files written before this setting existed keep every action enabled.
+    botActions: parseWhatsAppBotPermissions(values.bot_actions),
     outboundPort,
     outboundToken,
     pairedJid,
@@ -426,6 +439,7 @@ async function writeWhatsAppConfigFile(
     ...(config.outboundToken ? [`outbound_token=${config.outboundToken}`] : []),
     `require_group_mention=${config.requireGroupMention ? "true" : "false"}`,
     `allow_unpaired_group_members=${config.allowUnpairedGroupMembers ? "true" : "false"}`,
+    `bot_actions=${serializeWhatsAppBotPermissions(config.botActions)}`,
     "",
   ];
 
@@ -498,6 +512,10 @@ function buildSavedWhatsAppConfig(
       input.allowUnpairedGroupMembers ??
       existing?.allowUnpairedGroupMembers ??
       false,
+    botActions: resolveWhatsAppBotPermissions(
+      input.botActions,
+      existing?.botActions
+    ),
     outboundPort: existing?.outboundPort ?? null,
     outboundToken: existing?.outboundToken ?? null,
     pairedJid,

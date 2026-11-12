@@ -1,0 +1,237 @@
+From 5c78dac59cb5f7b3a81b3fc073d5ab473ef0f9c9 Mon Sep 17 00:00:00 2001
+From: Cloud-Dark <apipedia22@gmail.com>
+Date: Tue, 3 Nov 2026 17:03:35 +0800
+Subject: [PATCH] Docs katalog AI: pakai callId supaya model provider
+ non-default bisa dipanggil
+
+Halaman /docs/ai-models menampilkan dan menyalin `id` (public id tanpa
+awalan), sementara nama yang benar-benar dikirim di field `model` adalah
+`callId` - untuk provider non-default sudah berawalan slug, mis.
+"bansos/claude-opus-5-5".
+
+Akibatnya model Bansos terlihat seolah bukan milik provider itu, dan id
+yang disalin pelanggan jatuh ke provider default (OpenRouter) lalu gagal
+"model tidak tersedia". Gateway sendiri sudah benar: GET /v1/ai/catalog
+menjawab 343 model dengan 13 model Bansos lengkap ber-callId.
+
+- parseAiCatalog menyimpan callId, mundur ke id untuk server versi lama
+- id yang ditampilkan, disalin, dan dipakai cuplikan curl/Python/PHP
+  memakai callId
+- pencarian ikut mencocokkan callId supaya "bansos" bisa dicari
+- test regresi: callId dipertahankan, dan cuplikan tidak pernah memakai
+  nama model tanpa awalan slug
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+---
+ src/components/docs/DocsAiModels.tsx |  8 +++---
+ src/lib/docs/aiModels.ts             | 41 +++++++++++++++++-----------
+ tests/docs-snippets.test.ts          | 39 +++++++++++++++++++++++++-
+ 3 files changed, 67 insertions(+), 21 deletions(-)
+
+diff --git a/src/components/docs/DocsAiModels.tsx b/src/components/docs/DocsAiModels.tsx
+index 04777fa..3419ebd 100644
+--- a/src/components/docs/DocsAiModels.tsx
++++ b/src/components/docs/DocsAiModels.tsx
+@@ -177,7 +177,7 @@ export default function DocsAiModels({ index }: { index: DocsIndex }) {
+       if (price === 'quota' && !m.free) return false;
+       if (price === 'paid' && m.free) return false;
+       if (!words.length) return true;
+-      const hay = norm(`${m.id} ${m.name} ${m.provider ?? ''} ${m.modality} ${AI_MODALITY_LABEL[m.modality]}`);
++      const hay = norm(`${m.id} ${m.callId} ${m.name} ${m.provider ?? ''} ${m.modality} ${AI_MODALITY_LABEL[m.modality]}`);
+       return words.every((w) => hay.includes(w));
+     });
+     const byName = (a: AiModel, b: AiModel) => a.name.localeCompare(b.name);
+@@ -440,10 +440,10 @@ function ModelRow({ m, freeDaily, open, onToggle }: { m: AiModel; freeDaily: num
+             ) : null}
+           </div>
+           <div className="mt-1.5 flex min-w-0 items-center gap-1.5">
+-            <code className="min-w-0 truncate rounded-md bg-muted px-1.5 py-0.5 font-mono text-[12.5px] text-foreground" title={m.id}>
+-              {m.id}
++            <code className="min-w-0 truncate rounded-md bg-muted px-1.5 py-0.5 font-mono text-[12.5px] text-foreground" title={m.callId}>
++              {m.callId}
+             </code>
+-            <CopyButton text={m.id} variant="icon" label={t.copyId} />
++            <CopyButton text={m.callId} variant="icon" label={t.copyId} />
+           </div>
+           <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-[12px] text-muted-foreground">
+             <span className={cn(chip, MODALITY_TONE[m.modality])}>{AI_MODALITY_LABEL[m.modality]}</span>
+diff --git a/src/lib/docs/aiModels.ts b/src/lib/docs/aiModels.ts
+index 59b577b..d7bae1c 100644
+--- a/src/lib/docs/aiModels.ts
++++ b/src/lib/docs/aiModels.ts
+@@ -31,6 +31,14 @@ export interface AiPrice {
+ 
+ export interface AiModel {
+   id: string;
++  /**
++   * Nama yang BENAR-BENAR dikirim di field `model`. Untuk provider non-default
++   * sudah berawalan slug (mis. "bansos/claude-opus-5-5"); tanpa awalan itu
++   * permintaan jatuh ke provider default dan gagal "model tidak tersedia".
++   * Server yang menghitungnya (lihat modelCatalog di Edge Function `ai`),
++   * supaya aturan prefix tidak disusun ulang di sini dan menyimpang.
++   */
++  callId: string;
+   name: string;
+   provider: string | null;
+   format: 'openai' | 'anthropic';
+@@ -69,6 +77,7 @@ export function parseAiCatalog(data: unknown): AiCatalog | null {
+     const modality = AI_MODALITIES.includes(m.modality as AiModality) ? (m.modality as AiModality) : 'text';
+     models.push({
+       id: m.id,
++      callId: typeof m.callId === 'string' && m.callId ? m.callId : m.id,
+       name: typeof m.name === 'string' && m.name ? m.name : m.id,
+       provider: typeof m.provider === 'string' && m.provider ? m.provider : null,
+       format: m.format === 'anthropic' ? 'anthropic' : 'openai',
+@@ -139,27 +148,27 @@ const KEY = 'apk_xxxxxxxxxxxxxxxx';
+ const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+ 
+ function bodyFor(m: AiModel): Record<string, unknown> {
+-  if (m.format === 'anthropic') return { model: m.id, max_tokens: 512, messages: [{ role: 'user', content: 'Halo! Perkenalkan dirimu singkat.' }] };
++  if (m.format === 'anthropic') return { model: m.callId, max_tokens: 512, messages: [{ role: 'user', content: 'Halo! Perkenalkan dirimu singkat.' }] };
+   switch (m.modality) {
+     case 'embedding':
+-      return { model: m.id, input: ['Kota Bandung', 'Ibu kota Jawa Barat'] };
++      return { model: m.callId, input: ['Kota Bandung', 'Ibu kota Jawa Barat'] };
+     case 'image':
+-      return { model: m.id, prompt: 'Ilustrasi flat warung kopi di Yogyakarta saat senja', size: '1024x1024' };
++      return { model: m.callId, prompt: 'Ilustrasi flat warung kopi di Yogyakarta saat senja', size: '1024x1024' };
+     case 'speech':
+-      return { model: m.id, input: 'Selamat datang di APIPedia.', voice: 'alloy' };
++      return { model: m.callId, input: 'Selamat datang di APIPedia.', voice: 'alloy' };
+     case 'rerank':
+-      return { model: m.id, query: 'cara bayar pajak kendaraan online', documents: ['e-Samsat via mobile banking', 'Resep rendang padang'], top_n: 1 };
++      return { model: m.callId, query: 'cara bayar pajak kendaraan online', documents: ['e-Samsat via mobile banking', 'Resep rendang padang'], top_n: 1 };
+     case 'video':
+-      return { model: m.id, prompt: 'Drone melintas di atas sawah terasering saat matahari terbit', duration: 5, resolution: '720p', aspect_ratio: '16:9' };
++      return { model: m.callId, prompt: 'Drone melintas di atas sawah terasering saat matahari terbit', duration: 5, resolution: '720p', aspect_ratio: '16:9' };
+     default:
+-      return { model: m.id, messages: [{ role: 'user', content: 'Halo! Perkenalkan dirimu singkat.' }] };
++      return { model: m.callId, messages: [{ role: 'user', content: 'Halo! Perkenalkan dirimu singkat.' }] };
+   }
+ }
+ 
+ export function curlFor(m: AiModel): string {
+   const ep = endpointParts(m.endpoint);
+   if (m.modality === 'transcription' && m.format === 'openai') {
+-    return [`curl -X ${ep.method} "${ep.url}"`, `  -H "Authorization: Bearer ${KEY}"`, '  -F "file=@rekaman.m4a"', `  -F "model=${m.id}"`].join(' \\\n');
++    return [`curl -X ${ep.method} "${ep.url}"`, `  -H "Authorization: Bearer ${KEY}"`, '  -F "file=@rekaman.m4a"', `  -F "model=${m.callId}"`].join(' \\\n');
+   }
+   const auth = m.format === 'anthropic' ? [`  -H "x-api-key: ${KEY}"`, '  -H "anthropic-version: 2023-06-01"'] : [`  -H "Authorization: Bearer ${KEY}"`];
+   const submit = [`curl -X ${ep.method} "${ep.url}"`, ...auth, '  -H "Content-Type: application/json"', `  -d ${q(JSON.stringify(bodyFor(m)))}`].join(' \\\n');
+@@ -186,7 +195,7 @@ export function sdkFor(m: AiModel): { lang: 'python'; title: string; code: strin
+ 
+ client = Anthropic(base_url="${AI_BASE_URL}", api_key="${KEY}")
+ msg = client.messages.create(
+-    model="${m.id}",
++    model="${m.callId}",
+     max_tokens=512,
+     messages=[{"role": "user", "content": "Halo! Perkenalkan dirimu singkat."}],
+ )
+@@ -199,20 +208,20 @@ client = OpenAI(base_url="${AI_BASE_URL}", api_key="${KEY}")
+ `;
+   const call: Record<AiModality, string> = {
+     text: `res = client.chat.completions.create(
+-    model="${m.id}",
++    model="${m.callId}",
+     messages=[{"role": "user", "content": "Halo! Perkenalkan dirimu singkat."}],
+ )
+ print(res.choices[0].message.content)`,
+     video: '',
+     audio: '',
+-    embedding: `res = client.embeddings.create(model="${m.id}", input=["Kota Bandung", "Ibu kota Jawa Barat"])
++    embedding: `res = client.embeddings.create(model="${m.callId}", input=["Kota Bandung", "Ibu kota Jawa Barat"])
+ print(len(res.data[0].embedding))`,
+-    image: `res = client.images.generate(model="${m.id}", prompt="Ilustrasi flat warung kopi di Yogyakarta saat senja", size="1024x1024")
++    image: `res = client.images.generate(model="${m.callId}", prompt="Ilustrasi flat warung kopi di Yogyakarta saat senja", size="1024x1024")
+ print(res.data[0].url or "b64_json")`,
+-    speech: `with client.audio.speech.with_streaming_response.create(model="${m.id}", voice="alloy", input="Selamat datang di APIPedia.") as res:
++    speech: `with client.audio.speech.with_streaming_response.create(model="${m.callId}", voice="alloy", input="Selamat datang di APIPedia.") as res:
+     res.stream_to_file("suara.mp3")`,
+     transcription: `with open("rekaman.m4a", "rb") as f:
+-    res = client.audio.transcriptions.create(model="${m.id}", file=f)
++    res = client.audio.transcriptions.create(model="${m.callId}", file=f)
+ print(res.text)`,
+     rerank: '',
+   };
+@@ -264,7 +273,7 @@ export function phpFor(m: AiModel): string {
+     : ["'Authorization: Bearer ' . getenv('APIPEDIA_TOKEN'),"];
+   if (!multipart) headers.push("'Content-Type: application/json',");
+   const body = multipart
+-    ? ['    CURLOPT_POSTFIELDS => [', "        'file' => new CURLFile('rekaman.m4a'),", `        'model' => ${toPhp(m.id)},`, '    ],']
++    ? ['    CURLOPT_POSTFIELDS => [', "        'file' => new CURLFile('rekaman.m4a'),", `        'model' => ${toPhp(m.callId)},`, '    ],']
+     : [`    CURLOPT_POSTFIELDS => json_encode(${toPhp(bodyFor(m), 1)}),`];
+   const read: string[] =
+     m.modality === 'speech' && m.format === 'openai'
+@@ -389,7 +398,7 @@ ${fence(
+ 
+ Contoh yang sama dengan PHP (ekstensi cURL). Respons AI Gateway memakai format OpenAI/Anthropic apa adanya, tanpa amplop \`is_success\`:
+ 
+-${fence('php', phpFor({ id: '<id dari katalog>', name: '', provider: '', format: 'openai', endpoint: 'POST /v1/ai/chat/completions', modality: 'text', contextLength: null, free: false, pinned: false, pricing: { usd: { inputPer1m: null, outputPer1m: null, perRequest: null }, coin: { inputPer1m: null, outputPer1m: null, perRequest: null } } }))}
++${fence('php', phpFor({ id: '<id dari katalog>', callId: '<id dari katalog>', name: '', provider: '', format: 'openai', endpoint: 'POST /v1/ai/chat/completions', modality: 'text', contextLength: null, free: false, pinned: false, pricing: { usd: { inputPer1m: null, outputPer1m: null, perRequest: null }, coin: { inputPer1m: null, outputPer1m: null, perRequest: null } } }))}
+ 
+ Untuk model berformat \`anthropic\`, panggil \`POST ${AI_BASE_URL}/messages\` dengan header \`x-api-key\` (atau \`Authorization: Bearer\`). Detail setiap endpoint ada di [dokumentasi AI Gateway](${SITE_URL}${docsPath('ai-gateway')}); \`GET ${AI_BASE_URL}/models\` mengembalikan daftar yang sama dalam format OpenAI (butuh token).
+ `;
+diff --git a/tests/docs-snippets.test.ts b/tests/docs-snippets.test.ts
+index f09db09..c4061b0 100644
+--- a/tests/docs-snippets.test.ts
++++ b/tests/docs-snippets.test.ts
+@@ -7,7 +7,7 @@ import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+ import { baseUrlOf, operationsOf, phpSnippet, toPhp, type DocOperation, type OpenApiDoc } from '../src/lib/docs/model.ts';
+-import { phpFor, type AiModel } from '../src/lib/docs/aiModels.ts';
++import { curlFor, parseAiCatalog, phpFor, sdkFor, type AiModel } from '../src/lib/docs/aiModels.ts';
+ import { PRODUCT_GROUPS, catalogMarkdownList, catalogNodes, groupedCatalog, memberLabel } from '../src/lib/docs/groups.ts';
+ import { mdToHtml } from '../src/lib/docs/mdToHtml.ts';
+ import { overviewMarkdown } from '../src/lib/docs/markdown.ts';
+@@ -92,6 +92,7 @@ test('phpSnippet: semua endpoint di semua produk lolos `php -l`', { skip: !php &
+ 
+ const model = (m: Partial<AiModel>): AiModel => ({
+   id: 'openai/gpt-4o-mini',
++  callId: 'openai/gpt-4o-mini',
+   name: 'GPT-4o mini',
+   provider: 'OpenAI',
+   format: 'openai',
+@@ -181,3 +182,39 @@ test('groups: Markdown docs.md mendaftar grup sebagai list bersarang, SSR merend
+   const llms = readFileSync(new URL('../public/llms.txt', import.meta.url), 'utf8');
+   assert.match(llms, /- \*\*Downloader\*\* \(6 API\)\n {2}- \[YouTube Downloader\]/);
+ });
++
++
++/*
++ * Regresi: model provider non-default WAJIB dipanggil dengan awalan slug
++ * (mis. "bansos/claude-opus-5-5"). Gateway menghitungnya di `callId`; `id`
++ * adalah public id tanpa awalan. Menampilkan/menyalin `id` membuat permintaan
++ * jatuh ke provider default dan gagal "model tidak tersedia" - persis keluhan
++ * "model Bansos tidak ada di list" yang memicu perbaikan ini.
++ */
++test('parseAiCatalog: callId dipertahankan, dan mundur ke id bila server lama belum mengirimnya', () => {
++  const parsed = parseAiCatalog({
++    coinPerCredit: 18500,
++    freeDailyRequests: 10,
++    total: 2,
++    models: [
++      { id: 'claude-opus-5-5', callId: 'bansos/claude-opus-5-5', name: 'Claude Opus 5.5', provider: 'Bansos', format: 'anthropic', modality: 'text' },
++      { id: 'openai/gpt-4o-mini', name: 'GPT-4o mini', provider: 'OpenRouter', format: 'openai', modality: 'text' },
++    ],
++  });
++  assert.ok(parsed);
++  assert.equal(parsed.models.length, 2);
++  // Provider non-default: awalan slug dipertahankan apa adanya dari server.
++  assert.equal(parsed.models[0].id, 'claude-opus-5-5');
++  assert.equal(parsed.models[0].callId, 'bansos/claude-opus-5-5');
++  // Server versi lama tanpa callId: id adalah jawaban yang benar.
++  assert.equal(parsed.models[1].callId, 'openai/gpt-4o-mini');
++});
++
++test('cuplikan kode memakai callId, bukan id tanpa awalan', () => {
++  const bansos = model({ id: 'claude-opus-5-5', callId: 'bansos/claude-opus-5-5', provider: 'Bansos', format: 'anthropic', endpoint: 'POST /v1/ai/messages' });
++  for (const code of [curlFor(bansos), sdkFor(bansos).code]) {
++    assert.match(code, /bansos\/claude-opus-5-5/);
++    // Tidak boleh ada nama model tanpa awalan slug di posisi field `model`.
++    assert.doesNotMatch(code, /"claude-opus-5-5"/);
++  }
++});
+-- 
+2.43.7
+
