@@ -31,6 +31,7 @@ export const OPT_IN_BUNDLED_SKILL_NAMES = [
   "agent-browser",
   "google-meet",
   "knowledge-base-wiki",
+  "whatsapp-group-admin",
 ] as const;
 
 export const BUNDLED_SKILL_NAMES = [
