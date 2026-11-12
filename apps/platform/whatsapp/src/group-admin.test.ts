@@ -2,12 +2,15 @@ import { describe, expect, test } from "bun:test";
 import type { GroupMetadata, ParticipantAction } from "@whiskeysockets/baileys";
 import {
   findGroupAdminRole,
+  GROUP_SETTING_ACTIONS,
   type GroupAdminSocket,
   isGroupJid,
   isGroupParticipantAction,
+  isGroupSettingAction,
   readGroupInfo,
   toParticipantJid,
   updateGroupParticipants,
+  updateGroupSetting,
 } from "./group-admin";
 import type { WhatsAppAccount } from "./group-message";
 
@@ -23,6 +26,8 @@ type Call = {
   jid: string;
   participants: string[];
 };
+
+type SettingCall = { name: string; value?: number | string };
 
 function metadata(
   botAdmin: "admin" | "superadmin" | null,
@@ -54,8 +59,19 @@ function harness(
   } = {}
 ) {
   const calls: Call[] = [];
+  const settings: SettingCall[] = [];
+
+  const record = (name: string, value?: number | string) => {
+    settings.push({ name, value });
+
+    return Promise.resolve();
+  };
 
   const socket: GroupAdminSocket = {
+    groupInviteCode: () => Promise.resolve("INVITE123"),
+    groupJoinApprovalMode: (_jid, mode) => record("joinApproval", mode),
+    groupLeave: () => record("leave"),
+    groupMemberAddMode: (_jid, mode) => record("memberAdd", mode),
     groupMetadata: (jid) => {
       if (options.metadataError) {
         return Promise.reject(options.metadataError);
@@ -77,10 +93,28 @@ function harness(
         }))
       );
     },
+    groupRequestParticipantsList: () => Promise.resolve([]),
+    groupRequestParticipantsUpdate: (_jid, participants) =>
+      Promise.resolve(
+        participants.map((participant) => ({
+          jid: participant,
+          status: "200",
+        }))
+      ),
+    groupRevokeInvite: () => Promise.resolve("INVITE456"),
+    groupSettingUpdate: (_jid, setting) => record("setting", setting),
+    groupToggleEphemeral: (_jid, seconds) => record("ephemeral", seconds),
+    groupUpdateDescription: (_jid, description) =>
+      record("description", description ?? ""),
+    groupUpdateSubject: (_jid, subject) => record("subject", subject),
+    profilePictureUrl: () => Promise.resolve("https://example.test/photo.jpg"),
+    removeProfilePicture: () => record("photoRemove"),
+    updateProfilePicture: (_jid, content) => record("photoSet", content.url),
   };
 
   return {
     calls,
+    settings,
     context: {
       getAccount: () => me,
       getSocket: () => (options.socket === null ? null : socket),
@@ -312,5 +346,177 @@ describe("group info", () => {
     const result = await readGroupInfo(context, GROUP_JID);
 
     expect(result).toMatchObject({ botIsAdmin: false, ok: true });
+  });
+});
+
+describe("group settings", () => {
+  test("refuses every setting change when the bot is not an admin", async () => {
+    for (const action of GROUP_SETTING_ACTIONS) {
+      const { context, settings } = harness({ botAdmin: null });
+
+      const result = await updateGroupSetting(context, {
+        action,
+        groupJid: GROUP_JID,
+        seconds: 0,
+        text: "Nama Baru",
+        url: "https://example.test/a.jpg",
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.ok === false && result.code).toBe("bot_not_admin");
+      expect(settings).toEqual([]);
+    }
+  });
+
+  test("renames the group and rejects an empty or oversized name", async () => {
+    const { context, settings } = harness({ botAdmin: "admin" });
+
+    const renamed = await updateGroupSetting(context, {
+      action: "subject",
+      groupJid: GROUP_JID,
+      text: "Tim Produk Baru",
+    });
+
+    expect(renamed.ok).toBe(true);
+    expect(settings).toEqual([{ name: "subject", value: "Tim Produk Baru" }]);
+
+    const empty = await updateGroupSetting(context, {
+      action: "subject",
+      groupJid: GROUP_JID,
+      text: "   ",
+    });
+
+    expect(empty.ok === false && empty.code).toBe("invalid_input");
+
+    const long = await updateGroupSetting(context, {
+      action: "subject",
+      groupJid: GROUP_JID,
+      text: "x".repeat(101),
+    });
+
+    expect(long.ok === false && long.code).toBe("invalid_input");
+    expect(settings).toHaveLength(1);
+  });
+
+  test("sets and clears the group topic", async () => {
+    const { context, settings } = harness({ botAdmin: "admin" });
+
+    await updateGroupSetting(context, {
+      action: "topic",
+      groupJid: GROUP_JID,
+      text: "Diskusi rilis",
+    });
+
+    await updateGroupSetting(context, {
+      action: "topic",
+      groupJid: GROUP_JID,
+      text: "",
+    });
+
+    expect(settings).toEqual([
+      { name: "description", value: "Diskusi rilis" },
+      { name: "description", value: "" },
+    ]);
+  });
+
+  test("accepts an https photo and refuses anything else", async () => {
+    const { context, settings } = harness({ botAdmin: "admin" });
+
+    const set = await updateGroupSetting(context, {
+      action: "photo_set",
+      groupJid: GROUP_JID,
+      url: "https://example.test/photo.jpg",
+    });
+
+    expect(set.ok).toBe(true);
+
+    for (const url of ["http://example.test/a.jpg", "not a url", ""]) {
+      const refused = await updateGroupSetting(context, {
+        action: "photo_set",
+        groupJid: GROUP_JID,
+        url,
+      });
+
+      expect(refused.ok === false && refused.code).toBe("invalid_input");
+    }
+
+    await updateGroupSetting(context, {
+      action: "photo_remove",
+      groupJid: GROUP_JID,
+    });
+
+    expect(settings).toEqual([
+      { name: "photoSet", value: "https://example.test/photo.jpg" },
+      { name: "photoRemove", value: undefined },
+    ]);
+  });
+
+  test("allows only WhatsApp's own disappearing durations", async () => {
+    const { context, settings } = harness({ botAdmin: "admin" });
+
+    for (const seconds of [0, 86_400, 604_800, 7_776_000]) {
+      const result = await updateGroupSetting(context, {
+        action: "ephemeral",
+        groupJid: GROUP_JID,
+        seconds,
+      });
+
+      expect(result.ok).toBe(true);
+    }
+
+    const refused = await updateGroupSetting(context, {
+      action: "ephemeral",
+      groupJid: GROUP_JID,
+      seconds: 3600,
+    });
+
+    expect(refused.ok === false && refused.code).toBe("invalid_input");
+    expect(settings).toHaveLength(4);
+  });
+
+  test("maps each switch to the call WhatsApp expects", async () => {
+    const cases = [
+      { action: "announce_on", name: "setting", value: "announcement" },
+      { action: "announce_off", name: "setting", value: "not_announcement" },
+      { action: "locked_on", name: "setting", value: "locked" },
+      { action: "locked_off", name: "setting", value: "unlocked" },
+      { action: "join_approval_on", name: "joinApproval", value: "on" },
+      { action: "join_approval_off", name: "joinApproval", value: "off" },
+      { action: "member_add_admin_only", name: "memberAdd", value: "admin_add" },
+      { action: "member_add_all", name: "memberAdd", value: "all_member_add" },
+    ] as const;
+
+    for (const expected of cases) {
+      const { context, settings } = harness({ botAdmin: "admin" });
+
+      const result = await updateGroupSetting(context, {
+        action: expected.action,
+        groupJid: GROUP_JID,
+      });
+
+      expect(result.ok).toBe(true);
+
+      expect(settings).toEqual([
+        { name: expected.name, value: expected.value },
+      ]);
+    }
+  });
+
+  test("recognises its own setting names", () => {
+    expect(isGroupSettingAction("subject")).toBe(true);
+    expect(isGroupSettingAction("photo_set")).toBe(true);
+    expect(isGroupSettingAction("nonsense")).toBe(false);
+  });
+
+  test("refuses a setting change outside a group", async () => {
+    const { context } = harness({ botAdmin: "admin" });
+
+    const result = await updateGroupSetting(context, {
+      action: "subject",
+      groupJid: "628122222222@s.whatsapp.net",
+      text: "Tidak boleh",
+    });
+
+    expect(result.ok === false && result.code).toBe("not_a_group");
   });
 });

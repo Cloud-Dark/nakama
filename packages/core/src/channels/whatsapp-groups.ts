@@ -15,9 +15,28 @@ export const WHATSAPP_GROUP_ACTIONS = [
 
 export type WhatsAppGroupAction = (typeof WHATSAPP_GROUP_ACTIONS)[number];
 
+export const WHATSAPP_GROUP_SETTINGS = [
+  "announce_off",
+  "announce_on",
+  "ephemeral",
+  "join_approval_off",
+  "join_approval_on",
+  "locked_off",
+  "locked_on",
+  "member_add_admin_only",
+  "member_add_all",
+  "photo_remove",
+  "photo_set",
+  "subject",
+  "topic",
+] as const;
+
+export type WhatsAppGroupSetting = (typeof WHATSAPP_GROUP_SETTINGS)[number];
+
 export type WhatsAppGroupErrorCode =
   | "bot_not_admin"
   | "group_unreadable"
+  | "invalid_input"
   | "invalid_participants"
   | "not_a_group"
   | "not_configured"
@@ -54,11 +73,19 @@ const GroupInfoReplySchema = z.object({
   subject: z.string(),
 });
 
+const SettingReplySchema = z.object({
+  action: z.enum(WHATSAPP_GROUP_SETTINGS),
+  detail: z.string(),
+  groupSubject: z.string(),
+  ok: z.literal(true),
+});
+
 const WorkerErrorSchema = z.object({
   code: z
     .enum([
       "bot_not_admin",
       "group_unreadable",
+      "invalid_input",
       "invalid_participants",
       "not_a_group",
       "socket_unavailable",
@@ -66,6 +93,8 @@ const WorkerErrorSchema = z.object({
     .optional(),
   error: z.string().min(1).optional(),
 });
+
+export type WhatsAppGroupSettingResult = z.infer<typeof SettingReplySchema>;
 
 export type WhatsAppGroupParticipantOutcome = z.infer<
   typeof ParticipantsReplySchema
@@ -102,7 +131,13 @@ function fail(
 async function post(
   owner: WhatsAppGroupOwner,
   path: string,
-  body: { groupJid: string; participants?: string[] },
+  body: {
+    groupJid: string;
+    participants?: string[];
+    seconds?: number;
+    text?: string;
+    url?: string;
+  },
   options: WhatsAppGroupClientOptions
 ): Promise<WhatsAppGroupFailure | { ok: true; payload: z.core.JSONValue }> {
   const fetchImpl = options.fetchImpl ?? fetch;
@@ -180,6 +215,44 @@ export function createWhatsAppGroupClient(
       }
 
       const parsed = GroupInfoReplySchema.safeParse(result.payload);
+
+      return parsed.success
+        ? parsed.data
+        : fail("worker_error", "WhatsApp worker returned an unreadable reply.");
+    },
+
+    /**
+     * Name, topic, photo and the group switches. Refused with `bot_not_admin`
+     * exactly like a participant change, because WhatsApp requires the same
+     * rights for both.
+     */
+    async updateSetting(
+      owner: WhatsAppGroupOwner,
+      input: {
+        action: WhatsAppGroupSetting;
+        groupJid: string;
+        seconds?: number;
+        text?: string;
+        url?: string;
+      }
+    ): Promise<WhatsAppGroupFailure | WhatsAppGroupSettingResult> {
+      const result = await post(
+        owner,
+        `/groups/${input.action}`,
+        {
+          groupJid: input.groupJid,
+          seconds: input.seconds,
+          text: input.text,
+          url: input.url,
+        },
+        options
+      );
+
+      if (!result.ok) {
+        return result;
+      }
+
+      const parsed = SettingReplySchema.safeParse(result.payload);
 
       return parsed.success
         ? parsed.data

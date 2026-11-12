@@ -210,6 +210,119 @@ describe("createWhatsAppGroupClient", () => {
     );
   });
 
+  test("renames the group through the subject route", async () => {
+    await withPairedWorker(
+      () =>
+        Response.json({
+          action: "subject",
+          detail: 'Nama grup diubah menjadi "Tim Rilis".',
+          groupSubject: "Tim Produk",
+          ok: true,
+        }),
+      async (client, calls) => {
+        const result = await client.updateSetting(owner, {
+          action: "subject",
+          groupJid: GROUP_JID,
+          text: "Tim Rilis",
+        });
+
+        expect(result).toMatchObject({ action: "subject", ok: true });
+        expect(calls[0]?.url).toBe("http://127.0.0.1:4312/groups/subject");
+
+        expect(JSON.parse(calls[0]?.body ?? "{}")).toMatchObject({
+          groupJid: GROUP_JID,
+          text: "Tim Rilis",
+        });
+      }
+    );
+  });
+
+  test("passes a photo url and a disappearing duration through", async () => {
+    await withPairedWorker(
+      () =>
+        Response.json({
+          action: "photo_set",
+          detail: "Foto grup diperbarui.",
+          groupSubject: "Tim Produk",
+          ok: true,
+        }),
+      async (client, calls) => {
+        await client.updateSetting(owner, {
+          action: "photo_set",
+          groupJid: GROUP_JID,
+          url: "https://example.test/a.jpg",
+        });
+
+        expect(JSON.parse(calls[0]?.body ?? "{}")).toMatchObject({
+          url: "https://example.test/a.jpg",
+        });
+      }
+    );
+
+    await withPairedWorker(
+      () =>
+        Response.json({
+          action: "ephemeral",
+          detail: "Pesan sementara diatur 86400 detik.",
+          groupSubject: "Tim Produk",
+          ok: true,
+        }),
+      async (client, calls) => {
+        await client.updateSetting(owner, {
+          action: "ephemeral",
+          groupJid: GROUP_JID,
+          seconds: 86_400,
+        });
+
+        expect(JSON.parse(calls[0]?.body ?? "{}")).toMatchObject({
+          seconds: 86_400,
+        });
+      }
+    );
+  });
+
+  test("keeps bot_not_admin for a setting change too", async () => {
+    await withPairedWorker(
+      () =>
+        Response.json(
+          { code: "bot_not_admin", error: "Jadikan saya admin dulu.", ok: false },
+          { status: 409 }
+        ),
+      async (client) => {
+        const result = await client.updateSetting(owner, {
+          action: "topic",
+          groupJid: GROUP_JID,
+          text: "Baru",
+        });
+
+        expect(result.ok === false && result.code).toBe("bot_not_admin");
+      }
+    );
+  });
+
+  test("surfaces a rejected setting value as invalid_input", async () => {
+    await withPairedWorker(
+      () =>
+        Response.json(
+          {
+            code: "invalid_input",
+            error: "Berikan URL gambar https untuk foto grup.",
+            ok: false,
+          },
+          { status: 400 }
+        ),
+      async (client) => {
+        const result = await client.updateSetting(owner, {
+          action: "photo_set",
+          groupJid: GROUP_JID,
+          url: "http://insecure.test/a.jpg",
+        });
+
+        expect(result.ok === false && result.code).toBe("invalid_input");
+      }
+    );
+  });
+
   test("says so when WhatsApp was never paired", async () => {
     await withTempHome("nakama-wa-groups-unpaired-", async () => {
       const result = await createWhatsAppGroupClient({

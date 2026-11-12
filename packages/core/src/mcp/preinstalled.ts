@@ -3,6 +3,7 @@ import type { McpHttpConfig, McpStdioConfig, McpTransport } from "../contract";
 export const PREINSTALLED_MCP_SERVER_IDS = {
   exa: "mcp_exa",
   firecrawl: "mcp_firecrawl",
+  titen: "mcp_titen",
 } as const;
 
 export type PreinstalledMcpServerDefinition = {
@@ -28,6 +29,18 @@ export const preinstalledMcpServers: PreinstalledMcpServerDefinition[] = [
     id: PREINSTALLED_MCP_SERVER_IDS.firecrawl,
     name: "firecrawl",
     transport: "http",
+  },
+  {
+    // Titen serves its own local SQLite store when neither TITEN_MCP_URL nor
+    // TITEN_API_KEY is set, so memory works with no key and no extra service.
+    // Set both to point a profile at a served instance instead.
+    config: {
+      args: ["mcp"],
+      command: "titen",
+    },
+    id: PREINSTALLED_MCP_SERVER_IDS.titen,
+    name: "titen",
+    transport: "stdio",
   },
 ];
 

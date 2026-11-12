@@ -12,8 +12,10 @@ import {
   type GroupAdminErrorCode,
   type GroupAdminSocket,
   isGroupParticipantAction,
+  isGroupSettingAction,
   readGroupInfo,
   updateGroupParticipants,
+  updateGroupSetting,
 } from "./group-admin";
 import type { WhatsAppAccount } from "./group-message";
 import { rememberWhatsAppOutbound } from "./inbound-message";
@@ -48,6 +50,7 @@ export interface WhatsAppOutboundServerOptions {
 const GROUP_ERROR_STATUS = {
   bot_not_admin: 409,
   group_unreadable: 502,
+  invalid_input: 400,
   invalid_participants: 400,
   not_a_group: 400,
   socket_unavailable: 503,
@@ -114,6 +117,24 @@ async function handleGroupRequest(
       ? Response.json(info)
       : Response.json(info, {
           status: GROUP_ERROR_STATUS[info.code] ?? 500,
+        });
+  }
+
+  if (isGroupSettingAction(operation)) {
+    const seconds = "seconds" in body ? Number(body.seconds) : undefined;
+
+    const result = await updateGroupSetting(context, {
+      action: operation,
+      groupJid,
+      seconds: Number.isFinite(seconds) ? seconds : undefined,
+      text: "text" in body && isJsonString(body.text) ? String(body.text) : "",
+      url: "url" in body && isJsonString(body.url) ? String(body.url) : "",
+    });
+
+    return result.ok
+      ? Response.json(result)
+      : Response.json(result, {
+          status: GROUP_ERROR_STATUS[result.code] ?? 500,
         });
   }
 

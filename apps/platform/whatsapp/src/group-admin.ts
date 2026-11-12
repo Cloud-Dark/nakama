@@ -19,6 +19,7 @@ export type GroupParticipantAction =
 export type GroupAdminErrorCode =
   | "bot_not_admin"
   | "group_unreadable"
+  | "invalid_input"
   | "invalid_participants"
   | "not_a_group"
   | "socket_unavailable";
@@ -62,12 +63,47 @@ export interface GroupInfoSuccess {
 export type GroupInfoResult = GroupAdminFailure | GroupInfoSuccess;
 
 export interface GroupAdminSocket {
+  groupInviteCode: (jid: string) => Promise<string | undefined>;
+  groupJoinApprovalMode: (jid: string, mode: "off" | "on") => Promise<void>;
+  groupLeave: (jid: string) => Promise<void>;
+  groupMemberAddMode: (
+    jid: string,
+    mode: "admin_add" | "all_member_add"
+  ) => Promise<void>;
   groupMetadata: (jid: string) => Promise<GroupMetadata>;
   groupParticipantsUpdate: (
     jid: string,
     participants: string[],
     action: ParticipantAction
   ) => Promise<{ jid: string | undefined; status: string }[]>;
+  groupRequestParticipantsList: (
+    jid: string
+  ) => Promise<{ [key: string]: string }[]>;
+  groupRequestParticipantsUpdate: (
+    jid: string,
+    participants: string[],
+    action: "approve" | "reject"
+  ) => Promise<{ jid: string | undefined; status: string }[]>;
+  groupRevokeInvite: (jid: string) => Promise<string | undefined>;
+  groupSettingUpdate: (
+    jid: string,
+    setting: "announcement" | "locked" | "not_announcement" | "unlocked"
+  ) => Promise<void>;
+  groupToggleEphemeral: (
+    jid: string,
+    ephemeralExpiration: number
+  ) => Promise<void>;
+  groupUpdateDescription: (
+    jid: string,
+    description?: string
+  ) => Promise<void>;
+  groupUpdateSubject: (jid: string, subject: string) => Promise<void>;
+  profilePictureUrl: (
+    jid: string,
+    type?: "image" | "preview"
+  ) => Promise<string | undefined>;
+  removeProfilePicture: (jid: string) => Promise<void>;
+  updateProfilePicture: (jid: string, content: { url: string }) => Promise<void>;
 }
 
 const GROUP_JID_SUFFIX = "@g.us";
@@ -330,4 +366,235 @@ export async function updateGroupParticipants(
     ok: true,
     results,
   };
+}
+
+/** Group settings the bot may change, each needing admin rights. */
+export const GROUP_SETTING_ACTIONS = [
+  "announce_off",
+  "announce_on",
+  "ephemeral",
+  "join_approval_off",
+  "join_approval_on",
+  "locked_off",
+  "locked_on",
+  "member_add_admin_only",
+  "member_add_all",
+  "photo_remove",
+  "photo_set",
+  "subject",
+  "topic",
+] as const;
+
+export type GroupSettingAction = (typeof GROUP_SETTING_ACTIONS)[number];
+
+export interface GroupSettingSuccess {
+  action: GroupSettingAction;
+  detail: string;
+  groupSubject: string;
+  ok: true;
+}
+
+export type GroupSettingResult = GroupAdminFailure | GroupSettingSuccess;
+
+export function isGroupSettingAction(
+  value: string
+): value is GroupSettingAction {
+  return GROUP_SETTING_ACTIONS.some((action) => action === value);
+}
+
+const MAX_SUBJECT_CHARS = 100;
+
+const MAX_TOPIC_CHARS = 2048;
+
+/** WhatsApp's own disappearing-message choices, in seconds; 0 switches it off. */
+const EPHEMERAL_SECONDS = new Set([
+  0, 86_400, 604_800, 7_776_000,
+]);
+
+function photoUrl(value: string | undefined): string | null {
+  const url = value?.trim();
+
+  if (!url) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(url);
+
+    return parsed.protocol === "https:" ? parsed.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Subject, topic, photo and the group switches. Like participant changes these
+ * require the bot to be an admin, so they share the one gate.
+ */
+export async function updateGroupSetting(
+  context: GroupAdminContext,
+  input: {
+    action: GroupSettingAction;
+    groupJid: string;
+    seconds?: number;
+    text?: string;
+    url?: string;
+  }
+): Promise<GroupSettingResult> {
+  const loaded = await loadGroup(context, input.groupJid);
+
+  if (!loaded.ok) {
+    return loaded;
+  }
+
+  const { metadata, socket } = loaded;
+
+  if (!isGroupAdmin(metadata, context.getAccount())) {
+    return fail("bot_not_admin", botNotAdminMessage(metadata.subject));
+  }
+
+  const done = (detail: string): GroupSettingSuccess => ({
+    action: input.action,
+    detail,
+    groupSubject: metadata.subject,
+    ok: true,
+  });
+
+  const id = metadata.id;
+
+  if (input.action === "subject") {
+    const subject = input.text?.trim();
+
+    if (!subject || subject.length > MAX_SUBJECT_CHARS) {
+      return fail(
+        "invalid_input",
+        `Nama grup harus 1 sampai ${MAX_SUBJECT_CHARS} karakter.`
+      );
+    }
+
+    await socket.groupUpdateSubject(id, subject);
+
+    return done(`Nama grup diubah menjadi "${subject}".`);
+  }
+
+  if (input.action === "topic") {
+    const topic = input.text?.trim() ?? "";
+
+    if (topic.length > MAX_TOPIC_CHARS) {
+      return fail(
+        "invalid_input",
+        `Deskripsi grup maksimal ${MAX_TOPIC_CHARS} karakter.`
+      );
+    }
+
+    await socket.groupUpdateDescription(id, topic || undefined);
+
+    return done(topic ? "Deskripsi grup diperbarui." : "Deskripsi grup dihapus.");
+  }
+
+  if (input.action === "photo_set") {
+    const url = photoUrl(input.url);
+
+    if (!url) {
+      return fail("invalid_input", "Berikan URL gambar https untuk foto grup.");
+    }
+
+    await socket.updateProfilePicture(id, { url });
+
+    return done("Foto grup diperbarui.");
+  }
+
+  if (input.action === "photo_remove") {
+    await socket.removeProfilePicture(id);
+
+    return done("Foto grup dihapus.");
+  }
+
+  if (input.action === "ephemeral") {
+    const seconds = input.seconds ?? 0;
+
+    if (!EPHEMERAL_SECONDS.has(seconds)) {
+      return fail(
+        "invalid_input",
+        "Durasi pesan sementara hanya boleh 0, 86400, 604800 atau 7776000 detik."
+      );
+    }
+
+    await socket.groupToggleEphemeral(id, seconds);
+
+    return done(
+      seconds === 0
+        ? "Pesan sementara dimatikan."
+        : `Pesan sementara diatur ${seconds} detik.`
+    );
+  }
+
+  return await applyGroupSwitch(socket, id, input.action, done);
+}
+
+const SETTING_UPDATES = {
+  announce_off: "not_announcement",
+  announce_on: "announcement",
+  locked_off: "unlocked",
+  locked_on: "locked",
+} as const;
+
+const SWITCH_DETAILS = {
+  announce_off: "Semua anggota boleh mengirim pesan.",
+  announce_on: "Hanya admin yang boleh mengirim pesan.",
+  join_approval_off: "Permintaan gabung tidak perlu disetujui.",
+  join_approval_on: "Permintaan gabung harus disetujui admin.",
+  locked_off: "Semua anggota boleh mengubah info grup.",
+  locked_on: "Hanya admin yang boleh mengubah info grup.",
+  member_add_admin_only: "Hanya admin yang boleh menambah anggota.",
+  member_add_all: "Semua anggota boleh menambah anggota.",
+} as const;
+
+type GroupSwitchAction = keyof typeof SWITCH_DETAILS;
+
+function isSettingUpdateAction(
+  action: GroupSwitchAction
+): action is keyof typeof SETTING_UPDATES {
+  return Object.hasOwn(SETTING_UPDATES, action);
+}
+
+function isGroupSwitch(action: GroupSettingAction): action is GroupSwitchAction {
+  return Object.hasOwn(SWITCH_DETAILS, action);
+}
+
+async function applyGroupSwitch(
+  socket: GroupAdminSocket,
+  id: string,
+  action: GroupSettingAction,
+  done: (detail: string) => GroupSettingSuccess
+): Promise<GroupSettingResult> {
+  if (!isGroupSwitch(action)) {
+    return fail("invalid_input", `Aksi "${action}" tidak dikenal.`);
+  }
+
+  const setting = isSettingUpdateAction(action)
+    ? SETTING_UPDATES[action]
+    : null;
+
+  if (setting) {
+    await socket.groupSettingUpdate(id, setting);
+
+    return done(SWITCH_DETAILS[action]);
+  }
+
+  if (action === "join_approval_on" || action === "join_approval_off") {
+    await socket.groupJoinApprovalMode(
+      id,
+      action === "join_approval_on" ? "on" : "off"
+    );
+
+    return done(SWITCH_DETAILS[action]);
+  }
+
+  await socket.groupMemberAddMode(
+    id,
+    action === "member_add_admin_only" ? "admin_add" : "all_member_add"
+  );
+
+  return done(SWITCH_DETAILS[action]);
 }

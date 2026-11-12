@@ -206,9 +206,38 @@ async function startWhatsAppChannel(
 
         return {
           account: activeSocket.user,
+          groupInviteCode: (jid) => activeSocket.groupInviteCode(jid),
+          groupJoinApprovalMode: (jid, mode) =>
+            activeSocket.groupJoinApprovalMode(jid, mode),
+          groupLeave: (jid) => activeSocket.groupLeave(jid),
+          groupMemberAddMode: (jid, mode) =>
+            activeSocket.groupMemberAddMode(jid, mode),
           groupMetadata: (jid) => activeSocket.groupMetadata(jid),
           groupParticipantsUpdate: (jid, participants, action) =>
             activeSocket.groupParticipantsUpdate(jid, participants, action),
+          groupRequestParticipantsList: (jid) =>
+            activeSocket.groupRequestParticipantsList(jid),
+          groupRequestParticipantsUpdate: (jid, participants, action) =>
+            activeSocket.groupRequestParticipantsUpdate(
+              jid,
+              participants,
+              action
+            ),
+          groupRevokeInvite: (jid) => activeSocket.groupRevokeInvite(jid),
+          groupSettingUpdate: (jid, setting) =>
+            activeSocket.groupSettingUpdate(jid, setting),
+          groupToggleEphemeral: (jid, seconds) =>
+            activeSocket.groupToggleEphemeral(jid, seconds),
+          groupUpdateDescription: (jid, description) =>
+            activeSocket.groupUpdateDescription(jid, description),
+          groupUpdateSubject: (jid, subject) =>
+            activeSocket.groupUpdateSubject(jid, subject),
+          profilePictureUrl: (jid, type) =>
+            activeSocket.profilePictureUrl(jid, type),
+          removeProfilePicture: (jid) =>
+            activeSocket.removeProfilePicture(jid),
+          updateProfilePicture: (jid, content) =>
+            activeSocket.updateProfilePicture(jid, content),
         };
       },
       getSendHandle: () => {

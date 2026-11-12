@@ -20,6 +20,46 @@ const ParticipantsInputSchema = z.object({
   participants: z.array(z.string()).min(1).catch([]),
 });
 
+const SettingInputSchema = z.object({
+  groupJid: z.string().optional().catch(undefined),
+  text: z.string().optional().catch(undefined),
+  url: z.string().optional().catch(undefined),
+});
+
+const SwitchInputSchema = z.object({
+  groupJid: z.string().optional().catch(undefined),
+  seconds: z.number().int().optional().catch(undefined),
+  setting: z.string().catch(""),
+});
+
+type JsonSchemaProperty = {
+  description: string;
+  enum?: readonly string[];
+  type: string;
+};
+
+const GROUP_SWITCH_SETTINGS = [
+  "announce_off",
+  "announce_on",
+  "ephemeral",
+  "join_approval_off",
+  "join_approval_on",
+  "locked_off",
+  "locked_on",
+  "member_add_admin_only",
+  "member_add_all",
+] as const;
+
+type GroupSwitchSetting = (typeof GROUP_SWITCH_SETTINGS)[number];
+
+function isGroupSwitchSetting(value: string): value is GroupSwitchSetting {
+  return GROUP_SWITCH_SETTINGS.some((setting) => setting === value);
+}
+
+const SummaryInputSchema = z.object({
+  limit: z.number().int().optional().catch(undefined),
+});
+
 const PermissionInputSchema = z.object({
   action: z.string().optional().catch(undefined),
   enabled: z.boolean().optional().catch(undefined),
@@ -343,7 +383,172 @@ export const whatsappGroupPermissionsTool = {
   },
 } satisfies ToolDefinition;
 
+
+/** Name, topic, photo and the group switches, each behind its own permission. */
+const SETTING_TOOLS = [
+  {
+    action: "subject",
+    description:
+      "Rename the current WhatsApp group. Needs the bot to be a group admin.",
+    name: "whatsapp_group_set_subject",
+    needs: "text",
+    permission: "group_subject",
+  },
+  {
+    action: "topic",
+    description:
+      "Set or clear the description (bio) of the current WhatsApp group. An empty text clears it. Needs the bot to be a group admin.",
+    name: "whatsapp_group_set_topic",
+    needs: "text",
+    permission: "group_topic",
+  },
+  {
+    action: "photo_set",
+    description:
+      "Replace the photo of the current WhatsApp group with an https image URL. Needs the bot to be a group admin.",
+    name: "whatsapp_group_set_photo",
+    needs: "url",
+    permission: "group_photo",
+  },
+  {
+    action: "photo_remove",
+    description:
+      "Remove the photo of the current WhatsApp group. Needs the bot to be a group admin.",
+    name: "whatsapp_group_remove_photo",
+    needs: "none",
+    permission: "group_photo",
+  },
+] as const;
+
+function settingTool(spec: (typeof SETTING_TOOLS)[number]): ToolDefinition {
+  const groupJid: JsonSchemaProperty = {
+    description:
+      "The group to act on. Omit it: the group of the current message is used.",
+    type: "string",
+  };
+
+  const properties =
+    spec.needs === "text"
+      ? {
+          groupJid,
+          text: {
+            description:
+              spec.action === "topic"
+                ? "The new description. An empty string clears it."
+                : "The new group name.",
+            type: "string",
+          },
+        }
+      : spec.needs === "url"
+        ? {
+            groupJid,
+            url: {
+              description: "An https URL of the image to use.",
+              type: "string",
+            },
+          }
+        : { groupJid };
+
+  return {
+    description: spec.description,
+    name: spec.name,
+    parallelSafe: false,
+    parameters: {
+      additionalProperties: false,
+      properties,
+      required: spec.needs === "none" ? [] : [spec.needs],
+      type: "object",
+    },
+    async run(input, context: ToolContext) {
+      const parsed = SettingInputSchema.parse(input);
+      const turn = resolveGroupTurn(context, parsed.groupJid);
+      const { owner } = await authorize(turn, spec.permission);
+
+      const result = await groupClient.updateSetting(owner, {
+        action: spec.action,
+        groupJid: turn.chatJid,
+        text: parsed.text,
+        url: parsed.url,
+      });
+
+      if (!result.ok) {
+        throw new Error(result.error);
+      }
+
+      return result.detail;
+    },
+  } satisfies ToolDefinition;
+}
+
+export const whatsappGroupSettingTools = SETTING_TOOLS.map(settingTool);
+
+/** The group switches, as one tool with a named choice. */
+export const whatsappGroupSwitchTool = {
+  description:
+    "Change a switch on the current WhatsApp group: who may post, who may edit group info, whether joins need approval, who may add members, or the disappearing-message duration. Needs the bot to be a group admin.",
+  name: "whatsapp_group_switch",
+  parallelSafe: false,
+  parameters: {
+    additionalProperties: false,
+    properties: {
+      groupJid: {
+        description:
+          "The group to act on. Omit it: the group of the current message is used.",
+        type: "string",
+      },
+      seconds: {
+        description:
+          "For `ephemeral` only: 0 off, 86400 a day, 604800 a week, 7776000 90 days.",
+        type: "integer",
+      },
+      setting: {
+        description: "Which switch to set.",
+        enum: [
+          "announce_on",
+          "announce_off",
+          "locked_on",
+          "locked_off",
+          "join_approval_on",
+          "join_approval_off",
+          "member_add_admin_only",
+          "member_add_all",
+          "ephemeral",
+        ],
+        type: "string",
+      },
+    },
+    required: ["setting"],
+    type: "object",
+  },
+  async run(input, context: ToolContext) {
+    const parsed = SwitchInputSchema.parse(input);
+    const turn = resolveGroupTurn(context, parsed.groupJid);
+
+    if (!isGroupSwitchSetting(parsed.setting)) {
+      throw new Error(
+        `Pengaturan "${parsed.setting}" tidak dikenal.`
+      );
+    }
+
+    const { owner } = await authorize(turn, "group_settings");
+
+    const result = await groupClient.updateSetting(owner, {
+      action: parsed.setting,
+      groupJid: turn.chatJid,
+      seconds: parsed.seconds,
+    });
+
+    if (!result.ok) {
+      throw new Error(result.error);
+    }
+
+    return result.detail;
+  },
+} satisfies ToolDefinition;
+
 export const whatsappGroupTools: ToolDefinition[] = [
+  ...whatsappGroupSettingTools,
+  whatsappGroupSwitchTool,
   whatsappAddTool,
   whatsappDemoteTool,
   whatsappGroupInfoTool,
@@ -351,3 +556,111 @@ export const whatsappGroupTools: ToolDefinition[] = [
   whatsappKickTool,
   whatsappPromoteTool,
 ];
+
+const MessageContentSchema = z.union([
+  z.string(),
+  z.array(z.object({ text: z.string().optional() }).loose()),
+]);
+
+const TranscriptSchema = z.object({
+  messages: z.array(z.object({ content: MessageContentSchema, role: z.string() })),
+});
+
+type Transcript = z.infer<typeof TranscriptSchema>;
+
+interface SessionReader {
+  getSessionMessages(
+    sessionId: string,
+    orgId: string,
+    options?: { persistedOnly?: boolean }
+  ): Promise<Transcript | null>;
+}
+
+const SUMMARY_MAX_MESSAGES = 200;
+
+const SUMMARY_DEFAULT_MESSAGES = 60;
+
+function messageText(content: z.infer<typeof MessageContentSchema>): string {
+  return Array.isArray(content)
+    ? content
+        .values()
+        .map((part) => part.text ?? "")
+        .filter((text) => text.length > 0)
+        .toArray()
+        .join(" ")
+    : content;
+}
+
+/**
+ * Hands the model the real transcript of this chat to summarize. It reads what
+ * was persisted, so the summary rests on messages that exist rather than on
+ * what the model remembers of the turn.
+ */
+export function createWhatsAppGroupSummaryTool(
+  sessions: SessionReader
+): ToolDefinition {
+  return {
+    description:
+      "Read the recent messages of this WhatsApp chat so you can summarize the discussion. Returns the stored transcript, newest last. Summarize only what it contains; never invent a message.",
+    name: "whatsapp_group_summary",
+    parallelSafe: true,
+    parameters: {
+      additionalProperties: false,
+      properties: {
+        limit: {
+          description: `How many recent messages to read. Defaults to ${SUMMARY_DEFAULT_MESSAGES}, capped at ${SUMMARY_MAX_MESSAGES}.`,
+          type: "integer",
+        },
+      },
+      required: [],
+      type: "object",
+    },
+    async run(input, context: ToolContext) {
+      const parsed = SummaryInputSchema.parse(input);
+      const turn = resolveGroupTurn(context, undefined);
+      await authorize(turn, "group_summary");
+
+      if (!context.sessionId) {
+        throw new Error("Obrolan ini belum punya riwayat yang bisa dibaca.");
+      }
+
+      const raw = await sessions.getSessionMessages(
+        context.sessionId,
+        turn.orgId,
+        { persistedOnly: true }
+      );
+
+      const result = TranscriptSchema.safeParse(raw);
+
+      if (!(raw && result.success)) {
+        throw new Error("Riwayat obrolan ini tidak ditemukan.");
+      }
+
+      const limit = Math.min(
+        Math.max(parsed.limit ?? SUMMARY_DEFAULT_MESSAGES, 1),
+        SUMMARY_MAX_MESSAGES
+      );
+
+      const lines = result.data.messages
+        .values()
+        .map((message) => ({
+          role: message.role,
+          text: messageText(message.content).trim(),
+        }))
+        .filter((message) => message.text.length > 0)
+        .toArray()
+        .slice(-limit)
+        .map((message) => `${message.role}: ${message.text}`);
+
+      if (lines.length === 0) {
+        return "Belum ada pesan tersimpan untuk diringkas.";
+      }
+
+      return [
+        `Transkrip ${lines.length} pesan terakhir di obrolan ini:`,
+        "",
+        ...lines,
+      ].join("\n");
+    },
+  } satisfies ToolDefinition;
+}

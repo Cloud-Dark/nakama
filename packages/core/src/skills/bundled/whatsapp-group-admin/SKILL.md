@@ -1,6 +1,6 @@
 ---
 name: whatsapp-group-admin
-description: Act as an admin in a WhatsApp group — remove, add, promote or demote members, read the roster, and read or change which of those actions are allowed. Use when a user in a WhatsApp group asks the bot to kick, add, promote or demote somebody.
+description: Act as an admin in a WhatsApp group — remove, add, promote or demote members, rename the group, set its description or photo, change its switches, summarize the discussion, read the roster, and read or change which of those actions are allowed. Use when a user in a WhatsApp group asks the bot to kick, add, promote, demote, rename, change the photo or description, or summarize the chat.
 ---
 
 These tools work only in the WhatsApp group the current message came from. They cannot touch another group, and they are absent outside WhatsApp.
@@ -17,5 +17,9 @@ Then WhatsApp itself imposes a third: the bot must be a group admin to change me
 - When the bot is not an admin, the tool refuses with an Indonesian message asking to be made a group admin first. Pass that message on as the answer. Do not retry, and do not suggest a workaround — there is none.
 - WhatsApp answers per participant. A number may be refused (privacy settings, already a member) while the rest succeed. Report exactly who went through and who did not, with the status code, as the tool returns it.
 - Name the people you are about to act on in your reply, and act only on the ones the user named. Never widen a request: "kick the spammer" is one person, not everyone who posted a link.
+- `whatsapp_group_set_subject` renames the group (1–100 characters). `whatsapp_group_set_topic` sets its description, and an empty text clears it. `whatsapp_group_set_photo` takes an **https** image URL; an http or malformed URL is refused. `whatsapp_group_remove_photo` clears the photo.
+- `whatsapp_group_switch` sets one switch: `announce_on` / `announce_off` (only admins may post), `locked_on` / `locked_off` (only admins may edit group info), `join_approval_on` / `join_approval_off`, `member_add_admin_only` / `member_add_all`, and `ephemeral` with `seconds` of 0, 86400, 604800 or 7776000 — WhatsApp accepts no other duration.
+- `whatsapp_group_summary` returns the stored transcript of this chat. Summarize only what it contains: attribute each point to what was actually said, and never invent a message or a speaker. When it reports no stored messages, say that instead of guessing.
+- Changing the group name, photo, description or switches is visible to every member and is not silently reversible. For a request that does not say what to change it to, ask first.
 - `whatsapp_group_permissions` with no arguments lists which actions are on. With `action` and `enabled` it switches one. Only the owner and allow-listed numbers may switch an action; a group admin reading the list is fine. The user can also do this from the chat with `!perm`, `!perm on <aksi>` and `!perm off <aksi>`.
 - Removing a member is not reversible by you: the person must be re-added, and that needs their privacy settings to permit it. For a request that is ambiguous about who, ask before acting.
